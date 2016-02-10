@@ -1,0 +1,24 @@
+---
+execution:
+    - concurrency: 20
+      ramp-up: 30s
+      hold-for: 2m
+      scenario:
+        think-time: 0.75
+        requests:
+           - url: http://overwritten.com
+             method: GET
+modules:
+    blazemeter:
+      token: thisisoverwritten
+      browser-open: false
+    console:
+      disable: true
+
+reporting:
+      - module: blazemeter
+        test: Taurus in Bluemix
+      - module: fail-criteria
+        criterias:
+        - avg-rt>300ms for 10s, stop as failed
+        - fail>50% for 10s, stop as failed

@@ -1,0 +1,427 @@
+---
+stages:
+- name: Build Stage
+  inputs:
+  - type: git
+    branch: master
+  triggers:
+  - type: commit
+  properties:
+  - name: SLACK_WEBHOOK_PATH
+    value: ''
+    type: text
+  jobs:
+  - name: npm install
+    type: builder
+    artifact_dir: ''
+    build_type: shell
+    script: |
+      if [ -z "$SLACK_WEBHOOK_PATH" ]
+      then
+           echo " Assuming first time deploy and skipping webhook. "
+           npm install
+      else
+          output=$(git show ${GIT_COMMIT} --name-status)
+          curl -X POST --data-urlencode 'payload={"text": "'"New build has been initiated from commit -\n $output"'"}' ${SLACK_WEBHOOK_PATH}
+          npm install
+
+      fi
+- name: Linting + Unit test
+  inputs:
+  - type: job
+    stage: Build Stage
+    job: npm install
+  triggers:
+  - type: stage
+  properties:
+  - name: XUNIT_FILE
+    value: test/unit/output/xunit.xml
+    type: text
+  - name: firstDeploy
+    value: ''
+    type: text
+  jobs:
+  - name: lint
+    type: tester
+    script: |-
+      #!/bin/bash
+      # invoke jshint on app.js .. edit .jshintrc in root directory to change parameters
+      npm install
+      node_modules/.bin/jshint app.js --reporter=node_modules/jshint-junit-reporter/reporter.js > test/jslint.xml
+    enable_tests: true
+    test_file_pattern: test/jslint.xml
+  - name: lintcss
+    type: tester
+    script: |-
+      #!/bin/bash
+      # invoke lintcss
+      node_modules/.bin/csslint public/stylesheets/*.css --ignore=box-model,ids --format=junit-xml > test/csslint.xml
+    enable_tests: true
+    test_file_pattern: test/csslint.xml
+  - name: Mocha Unit Test
+    type: tester
+    script: |-
+      #!/bin/bash
+      # Simple mocha unit test case ... src found in /test/unit
+      ./node_modules/.bin/mocha --reporter xunit-file ./test/unit/mocha.js
+    enable_tests: true
+    test_file_pattern: test/unit/output/xunit.xml
+- name: Push to test
+  inputs:
+  - type: git
+    branch: master
+  triggers:
+  - type: stage
+  jobs:
+  - name: Deploy
+    type: deployer
+    target:
+      url: ${CF_TARGET_URL}
+      organization: ${CF_ORGANIZATION}
+      space: ${CF_SPACE}
+      application: ${CF_APP} 
+    script: "output=`cf services`\nif [[ $(echo $output | grep \"${CF_APP}-autoscaling\"\
+      ) = \"\" ]]\nthen\n  echo \"No ${CF_APP}-autoscaling found in environment ...\
+      \ assuming first time   deploy ... skipping test application deployment\"\n\
+      \  \nelse\n\n    cf create-service cloudantNoSQLDB Shared ${CF_APP}-Cloudant-test\n\
+      \    cf push \"${CF_APP}-test\" -n \"${CF_APP}-test\" --no-start\n    cf bind-service\
+      \ \"${CF_APP}-test\" ${CF_APP}-Cloudant-test\n    cf bind-service \"${CF_APP}-test\"\
+      \ ${CF_APP}-autoscaling\n    cf bind-service \"${CF_APP}-test\" ${CF_APP}-NewRelic\n\
+      \    cf start \"${CF_APP}-test\"\n\nfi"
+- name: Performance test with Blazemeter
+  inputs:
+  - type: git
+    branch: master
+  triggers:
+  - type: stage
+  properties:
+  - name: token
+    value: ''
+    type: text
+  - name: APP_NAME
+    value: ''
+    type: text
+  jobs:
+  - name: Check for test application
+    type: deployer
+    target:
+      url: ${CF_TARGET_URL}
+      organization: ${CF_ORGANIZATION}
+      space: ${CF_SPACE}
+      application: ${CF_APP} 
+    script: "#!/bin/bash\nexport APP_NAME=\"${CF_APP}-test\" \n"
+  - name: Test
+    type: tester
+    script: "#!/bin/bash\n# invoke tests here\nname=${token}\nif [ -z \"$name\" ]\n\
+      then\n  echo \"No token found in environment variable... assuming first time\
+      \ deploy ... skipping performance testing\"  \nelse\n     sudo apt-get update\n\
+      \     sudo apt-get install -y python default-jre-headless python-tk python-pip\
+      \ python-dev libxml2-dev libxslt-dev zlib1g-dev\n     sudo pip install bzt\n\
+      \     bzt performanceTest.yml -o execution.0.scenario.requests.0.url=http://${APP_NAME}.mybluemix.net\
+      \ -o modules.blazemeter.token=${token} \n\n fi\n"
+- name: 'SauceLabs selenium test with database check '
+  inputs:
+  - type: job
+    stage: Build Stage
+    job: npm install
+  triggers:
+  - type: stage
+  properties:
+  - name: url
+    value: ''
+    type: text
+  - name: XUNIT_FILE
+    value: test/sauce/output/xunit.xml
+    type: text
+  - name: APP_NAME
+    value: ''
+    type: text
+  jobs:
+  - name: Set env variable "url"
+    type: deployer
+    target:
+      url: ${CF_TARGET_URL}
+      organization: ${CF_ORGANIZATION}
+      space: ${CF_SPACE}
+      application: ${CF_APP} 
+    script: "#!/bin/bash\nexport APP_NAME=${CF_APP}\noutput=`cf apps`\nif [[ $(echo\
+      \ $output | grep \"${CF_APP}-test\") = \"\" ]]\nthen\n  echo \"No test application\
+      \ found of BlueMessenger ... assuming first deploy ... skipping test\"\nelse\n\
+      \   output=`cf env \"${CF_APP}-test\" | grep url | grep bluemix.cloudant.com`\n\
+      \   export url=${output:13:${#output}-15}\n   echo ${url}\nfi \n"
+  - name: Selenium test
+    type: tester
+    extension_id: ibm.devops.services.pipeline.saucelabs
+    target:
+      url: ${CF_TARGET_URL}
+      organization: ${CF_ORGANIZATION}
+      space: ${CF_SPACE}
+      application: ${CF_APP} 
+    ACCESS: asdasd
+    DL_ASSETS: 'true'
+    SELECT_CMD: custom
+    USER_ID: asdad
+    COMMAND: |-
+      #!/bin/bash
+      if [ -z "$url" ]
+      then
+        echo "no url ... assuming first time deploy ... skipping"
+      else
+        npm test
+      fi
+  - name: Mocha test. Check database for data.
+    type: tester
+    script: |-
+      #!/bin/bash
+      # invoke basic mocha test to check sauce script sent data to cloudant database
+      if [ -z "$url" ]
+      then
+        echo "no url ... assuming first time deploy ... skipping"
+      else
+        ./node_modules/.bin/mocha --reporter xunit-file ./test/sauce/mocha-DBtest.js
+      fi
+    enable_tests: true
+    test_file_pattern: test/sauce/output/xunit.xml
+- name: 'Delete testing environment '
+  inputs:
+  - type: job
+    stage: Build Stage
+    job: npm install
+  triggers:
+  - type: stage
+  jobs:
+  - name: Deploy
+    type: deployer
+    target:
+      url: ${CF_TARGET_URL}
+      organization: ${CF_ORGANIZATION}
+      space: ${CF_SPACE}
+      application: ${CF_APP} 
+    script: "#!/bin/bash\noutput=`cf apps`\nif [[ $(echo $output | grep \"${CF_APP}-test\"\
+      ) = \"\" ]]\nthen\n  echo \"No test application found of BlueMessenger ... assuming\
+      \ first deploy ... skipping test\"\nelse\n   cf stop \"${CF_APP}-test\"\n  \
+      \ cf delete \"${CF_APP}-test\" -f\n   cf delete-service \"${CF_APP}-cloudant-test\"\
+      \ -f\nfi \n\n"
+- name: Push to Production using Active Deploy service
+  inputs:
+  - type: git
+    branch: master
+  triggers:
+  - type: stage
+  properties:
+  - name: CF_ACTIVE_DEPLOY_ENDPOINT
+    value: http://activedeployapi.ng.bluemix.net
+    type: text
+  - name: ROUTE_HOSTNAME
+    value: ''
+    type: text
+  - name: ROUTE_DOMAIN
+    value: mybluemix.net
+    type: text
+  - name: AUTO_RECOVERY
+    value: 'false'
+    type: text
+  - name: CONCURRENT_VERSIONS
+    value: '2'
+    type: text
+  - name: RAMPUP
+    value: '60'
+    type: text
+  - name: TEST
+    value: '100'
+    type: text
+  - name: RAMPDOWN
+    value: '60'
+    type: text
+  - name: BACKEND
+    value: APPS
+    type: text
+  - name: UPDATE_ID
+    value: Value
+    type: text
+  - name: USER_TEST
+    value: Value
+    type: text
+  - name: firstDeploy
+    value: ''
+    type: text
+  jobs:
+  - name: Deploy Successor
+    type: deployer
+    target:
+      url: ${CF_TARGET_URL}
+      organization: ${CF_ORGANIZATION}
+      space: ${CF_SPACE}
+      application: ${CF_APP} 
+    script: "#!/bin/bash\n#!/bin/bash\noutput=`cf services`\nexport ROUTE_HOSTNAME=${CF_APP}\n\
+      if [[ $(echo $output | grep \"${CF_APP}-cloudant\") = \"\" ]]\nthen\n\n  echo\
+      \ \"No instance of ${CF_APP}-cloudant found ... assuming first deploy ... skipping\
+      \ Active deploy\"\n\n    cf create-service cloudantNoSQLDB Shared ${CF_APP}-cloudant\n\
+      \    cf create-service Auto-Scaling free ${CF_APP}-autoscaling\n    cf create-service\
+      \ newrelic standard ${CF_APP}-NewRelic\n   cf push \"${CF_APP}\" -i 1 -d mybluemix.net\
+      \ -n ${CF_APP} --no-start\n    monitoring=`cf services | grep MonitoringAndAnalytics\
+      \ | awk '{print $1}'`\n    if [ -z \"$monitoring\" ]\n    then\n    cf create-service\
+      \ MonitoringAndAnalytics Free ${CF_APP}-monitoring\n    cf bind-service \"${CF_APP}\"\
+      \ ${CF_APP}-monitoring\n    else\n    cf bind-service \"${CF_APP}\" $monitoring\n\
+      \    fi\n    cf bind-service \"${CF_APP}\" ${CF_APP}-cloudant\n    cf bind-service\
+      \ \"${CF_APP}\" ${CF_APP}-autoscaling\n    cf bind-service \"${CF_APP}\" ${CF_APP}-NewRelic\n\
+      \    cf start \"${CF_APP}\"\n   \n\nelse\n \n    export firstDeploy=false\n\
+      \    env\n\n    UPDATE_ID=${BUILD_NUMBER}\n    echo \"update id: ${UPDATE_ID}\"\
+      \n    export UPDATE_ID\n    monitoring=`cf services | grep MonitoringAndAnalytics\
+      \ | awk '{print $1}'`\n    cf push \"${CF_APP}_${BUILD_NUMBER}\" --no-route\
+      \ -i 1 -s cflinuxfs2 --no-start\n    cf bind-service \"${CF_APP}_${BUILD_NUMBER}\"\
+      \ $monitoring\n    cf bind-service \"${CF_APP}_${BUILD_NUMBER}\" BlueMessenger-cloudant\n\
+      \    cf bind-service \"${CF_APP}_${BUILD_NUMBER}\" BlueMessenger-autoscaling\n\
+      \    cf bind-service \"${CF_APP}_${BUILD_NUMBER}\" BlueMessenger-NewRelic\n\
+      \  cf start \"${CF_APP}_${BUILD_NUMBER}\"\n\nfi "
+  - name: Begin AD, Rampup
+    type: deployer
+    target:
+      url: ${CF_TARGET_URL}
+      organization: ${CF_ORGANIZATION}
+      space: ${CF_SPACE}
+      application: ${CF_APP} 
+    script: |-
+      #!/bin/bash
+
+      if [ -z "$firstDeploy" ]
+      then
+        echo "assuming first time deploy ... skipping"
+      else
+          env
+
+      with_retry() {
+          if [[ $DEBUG -eq 1 ]]; then
+              local START_TIME=$(date +"%s")
+          fi
+          local RETRY_CALL="$*"
+          echo $RETRY_CALL
+          $RETRY_CALL
+          local RETRY_RC=$?
+          local CURRENT_RETRY_COUNT=0
+          if [ -z "$CMD_RETRY" ]; then
+              local CMD_RETRY=5
+          fi
+          while [[  $CURRENT_RETRY_COUNT -lt $CMD_RETRY && $RETRY_RC -ne 0 ]]; do
+              ((CURRENT_RETRY_COUNT++))
+              echo -e "${label_color}${1} command failed; retrying in 3 seconds${no_color} ($CURRENT_RETRY_COUNT of $CMD_RETRY)"
+              sleep 3
+              echo $RETRY_CALL
+              $RETRY_CALL
+              RETRY_RC=$?
+          done
+
+          if [ $RETRY_RC -ne 0 ]; then
+              echo -e "${red}${1} command failed: $RETRY_CALL${no_color}" | tee -a "$ERROR_LOG_FILE"
+          fi
+
+          if [[ $DEBUG -eq 1 ]]; then
+              local END_TIME=$(date +"%s")
+              export LAST_CMD_TIME=$(($END_TIME-$START_TIME))
+              echo -e "Cmd '$RETRY_CALL' runtime of `date -u -d @\"$LAST_CMD_TIME\" +'%-Mm %-Ss'`"
+          fi
+
+          return $RETRY_RC
+      }
+
+      # use this function to help avoid pipeline problems when accessing git repositories
+      git_retry() {
+          if [ -n "$GIT_RETRY" ]; then
+              local SAVE_CMD_RETRY=$CMD_RETRY
+              export CMD_RETRY=$GIT_RETRY
+          fi
+          with_retry "git" $*
+          if [ -n "$SAVE_CMD_RETRY" ]; then
+              export CMD_RETRY=$SAVE_CMD_RETRY
+          fi
+      }
+
+      git_retry clone https://github.com/eergun1/deployscripts_step.git deployscripts_step
+      /bin/bash deployscripts_step/activedeploy_step_1.sh
+      #source ${EXT_DIR}/deployscripts_step/temp1.sh
+
+
+      fi
+  - name: Test
+    type: tester
+    fail_stage: false
+    script: |-
+      #!/bin/bash
+      # invoke tests here
+      if [ -z "$firstDeploy" ]
+      then
+        echo "assuming first time deploy ... skipping"
+      else
+
+      USER_TEST=true
+
+      export USER_TEST
+
+      fi
+  - name: Finish AD
+    type: deployer
+    target:
+      url: ${CF_TARGET_URL}
+      organization: ${CF_ORGANIZATION}
+      space: ${CF_SPACE}
+      application: ${CF_APP} 
+    script: |-
+      #!/bin/bash
+
+      if [ -z "$firstDeploy" ]
+      then
+        echo "assuming first time deploy ... skipping"
+      else
+
+      env
+
+      with_retry() {
+          if [[ $DEBUG -eq 1 ]]; then
+              local START_TIME=$(date +"%s")
+          fi
+          local RETRY_CALL="$*"
+          echo $RETRY_CALL
+          $RETRY_CALL
+          local RETRY_RC=$?
+          local CURRENT_RETRY_COUNT=0
+          if [ -z "$CMD_RETRY" ]; then
+              local CMD_RETRY=5
+          fi
+          while [[  $CURRENT_RETRY_COUNT -lt $CMD_RETRY && $RETRY_RC -ne 0 ]]; do
+              ((CURRENT_RETRY_COUNT++))
+              echo -e "${label_color}${1} command failed; retrying in 3 seconds${no_color} ($CURRENT_RETRY_COUNT of $CMD_RETRY)"
+              sleep 3
+              echo $RETRY_CALL
+              $RETRY_CALL
+              RETRY_RC=$?
+          done
+
+          if [ $RETRY_RC -ne 0 ]; then
+              echo -e "${red}${1} command failed: $RETRY_CALL${no_color}" | tee -a "$ERROR_LOG_FILE"
+          fi
+
+          if [[ $DEBUG -eq 1 ]]; then
+              local END_TIME=$(date +"%s")
+              export LAST_CMD_TIME=$(($END_TIME-$START_TIME))
+              echo -e "Cmd '$RETRY_CALL' runtime of `date -u -d @\"$LAST_CMD_TIME\" +'%-Mm %-Ss'`"
+          fi
+
+          return $RETRY_RC
+      }
+
+      # use this function to help avoid pipeline problems when accessing git repositories
+      git_retry() {
+          if [ -n "$GIT_RETRY" ]; then
+              local SAVE_CMD_RETRY=$CMD_RETRY
+              export CMD_RETRY=$GIT_RETRY
+          fi
+          with_retry "git" $*
+          if [ -n "$SAVE_CMD_RETRY" ]; then
+              export CMD_RETRY=$SAVE_CMD_RETRY
+          fi
+      }
+
+      git_retry clone https://github.com/eergun1/deployscripts_step.git deployscripts_step
+      /bin/bash deployscripts_step/activedeploy_step_2.sh
+
+      fi
