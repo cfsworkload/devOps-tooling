@@ -21,7 +21,7 @@ When you deploy the pipeline to Bluemix, you'll also sign up for **Slack**, a co
 
 1. Select the **Deploy to Bluemix** button below. In the deployment screen that comes up, you will see the integration sections for **Slack** and **Sauce Labs**.
 
-  [![Deploy to Bluemix](https://bluemix.net/deploy/button.png)](https://bluemix.net/deploy?repository=https://github.com/wprichar/DevOPs-tooling.git)
+  [![Deploy to Bluemix](https://bluemix.net/deploy/button.png)](https://bluemix.net/deploy?repository=https://github.com/cfsworkload/devOps-tooling.git)
 2. Select **Create an account** on both to retrieve the necessary information for the fields requested.
 3. Create a channel in Slack to view continuous status messages of your pipeline.
 4. See https://api.slack.com/web#authentication to get a Slack API key.
