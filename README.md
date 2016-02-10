@@ -133,7 +133,6 @@ In the **Delete testing environment** stage, the test application and database a
 
 At this point, the pipeline has gone through testing and the testing environment has been deleted. Now the goal is to push the new version of the Blue Messenger app to production using the Bluemix service **Active Deploy**. The Active Deploy service takes two running apps (the new and old version) and provides a zero-downtime transition. For more information on the service, view the [Active Deploy docs](https://www.ng.bluemix.net/docs/services/ActiveDeploy/index.html).
 
-At the end of the deployment, a REST API call to the bound **App Scan Dynamic Analyzer** service is made. This provides a security scan of your production application. Because this service incurs charges, this call is currently commented out at the bottom of the deployment script in the **App Scan** job. To have this call initiated, uncomment the curl command at the bottom of the script. After the API call, you are able to monitor the progress of the scan by clicking on the service in your application dashboard.  For more information on the service, view the [App Scan Dynamic Analyzer docs](https://www.ng.bluemix.net/docs/#services/AppScanDynamicAnalyzer/index.html#AppScanDynamicAnalyzer).
 
 ### Monitor the app
 
