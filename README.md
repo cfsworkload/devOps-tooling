@@ -139,7 +139,7 @@ At this point, the pipeline has gone through testing and the testing environment
 This pipeline provides three different sources of real-time data of your Blue Messenger in production.
 
 - Google Analytics: A link to your data is found at https://ga-dev-tools.appspot.com/account-explorer.
-- New Relic: Load the dashboard by selecting **Bluemessenger-NewRelic** in your application dashboard.
+- New Relic: Load the dashboard by selecting the **newrelic** in your application dashboard.
 - Monitoring & Analytics: Select the **Monitoring & Analytics** instance in your application dashboard.
 
 ### Planning tool
