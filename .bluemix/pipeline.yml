@@ -275,8 +275,9 @@ stages:
       \ -i 1 -s cflinuxfs2 --no-start\n    cf bind-service \"${CF_APP}_${BUILD_NUMBER}\"\
       \ $monitoring\n    cf bind-service \"${CF_APP}_${BUILD_NUMBER}\" ${CF_APP}-cloudant\n\
       \    cf bind-service \"${CF_APP}_${BUILD_NUMBER}\" ${CF_APP}-autoscaling\n \
-      \   cf bind-service \"${CF_APP}_${BUILD_NUMBER}\" ${CF_APP}-NewRelic\n    cf\
-      \ start \"${CF_APP}_${BUILD_NUMBER}\"\n\nfi "
+      \   monitoring=`cf services | grep newrelic | awk '{print $1}'`\n    cf bind-service\
+      \ \"${CF_APP}_${BUILD_NUMBER}\" $monitoring\n    cf start \"${CF_APP}_${BUILD_NUMBER}\"\
+      \n\nfi "
   - name: Begin AD, Rampup
     type: deployer
     target:
