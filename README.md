@@ -2,7 +2,7 @@
 
 ### DevOps continuous integration applied to Blue Messenger
 
-The Bluemix pipeline has been created and applied to the Architecture Center's [Blue Messenger](https://hub.jazz.net/project/cfsworkload/blue-messenger/overview) app.
+The Bluemix pipeline has been created and applied to the Architecture Center's [Blue Messenger](https://github.com/cfsworkload/blue-messenger/overview) app.
 
 ## Introduction
 
